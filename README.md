@@ -41,4 +41,5 @@ App (src/app.py) - 控制器，协调各组件
 
 ### 菜单结构
 
+
 5个主选项，其中提醒/折叠/方块有5个子选项(primary/info/warning/success/danger)。每个输出模板的光标偏移量通过 `cursor_offset` 计算。

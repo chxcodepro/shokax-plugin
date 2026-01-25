@@ -13,10 +13,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Get version from tag
+        id: get_version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -24,8 +34,24 @@ jobs:
       - name: Build executable
         run: python -m PyInstaller build.spec --noconfirm
 
+      - name: Download Inno Setup
+        run: |
+          Invoke-WebRequest -Uri "https://jrsoftware.org/download.php/is.exe" -OutFile "innosetup.exe"
+          Start-Process -FilePath "innosetup.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -Wait
+
+      - name: Update Inno Setup script version
+        shell: bash
+        run: |
+          sed -i "s/#define MyAppVersion \".*\"/#define MyAppVersion \"${{ steps.get_version.outputs.VERSION }}\"/" installer.iss
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/shokaX plugin.exe
+          files: |
+            dist/shokaX plugin.exe
+            dist/shokaX_plugin_setup_v${{ steps.get_version.outputs.VERSION }}.exe
           generate_release_notes: true

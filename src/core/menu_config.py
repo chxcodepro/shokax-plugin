@@ -33,21 +33,21 @@ SUB_MENU_ITEMS = [
 
 
 def _reminder_template(sub_key: str) -> str:
-    return f":::{sub_key}\n\n:::"
+    return f":::{sub_key}\r\n\r\n:::"
 
 
 def _reminder_offset(sub_key: str) -> int:
     # 光标需要定位到两个:::之间的空行
-    # 模板: ":::{sub_key}\n\n:::" 从末尾往前数4个字符（\n:::）
-    return 4
+    # 模板: ":::{sub_key}\r\n\r\n:::" 从末尾往前数5个字符（\r\n:::）
+    return 5
 
 
 def _fold_template(sub_key: str) -> str:
-    return f"+++{sub_key}\n\n+++"
+    return f"+++{sub_key}\r\n\r\n+++"
 
 
 def _fold_offset(sub_key: str) -> int:
-    return 4
+    return 5
 
 
 def _block_template(sub_key: str) -> str:
@@ -94,8 +94,8 @@ MENU_ITEMS = [
         key="card",
         label="卡片",
         has_submenu=False,
-        template=";;;[id] []\n\n;;;",
-        cursor_offset=4,  # 从末尾往前数4个字符到空行位置
+        template=";;;[id] []\r\n\r\n;;;",
+        cursor_offset=5,  # 从末尾往前数5个字符到空行位置
     ),
 ]
 

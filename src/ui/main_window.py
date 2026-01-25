@@ -9,11 +9,15 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
     QMenu,
     QKeySequenceEdit,
+    QMessageBox,
+    QProgressDialog,
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QThread
 from PySide6.QtGui import QIcon, QAction, QKeySequence
 
 from src.ui.styles import MAIN_WINDOW_STYLE
+from src.core.version import __version__
+from src.core.updater import UpdateChecker
 
 
 def parse_key_sequence(seq: QKeySequence) -> dict | None:
@@ -81,6 +85,20 @@ def hotkey_to_sequence(hotkey: dict) -> QKeySequence:
     return QKeySequence("+".join(parts))
 
 
+class UpdateCheckThread(QThread):
+    """更新检查线程"""
+
+    update_found = Signal(dict)
+    no_update = Signal()
+
+    def run(self):
+        update_info = UpdateChecker.check_update()
+        if update_info:
+            self.update_found.emit(update_info)
+        else:
+            self.no_update.emit()
+
+
 class MainWindow(QMainWindow):
     """主窗口"""
 
@@ -92,12 +110,14 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._is_running = False
         self._current_hotkey: dict = {"modifiers": ["ctrl"], "key": "space"}
+        self._update_thread = None
         self._init_ui()
         self._init_tray()
+        self._check_update_on_startup()
 
     def _init_ui(self):
-        self.setWindowTitle("shokaX plugin")
-        self.setFixedSize(280, 200)
+        self.setWindowTitle(f"shokaX plugin v{__version__}")
+        self.setFixedSize(280, 220)
         self.setStyleSheet(MAIN_WINDOW_STYLE)
 
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
@@ -166,6 +186,10 @@ class MainWindow(QMainWindow):
         show_action = QAction("显示窗口", self)
         show_action.triggered.connect(self._show_window)
         menu.addAction(show_action)
+
+        check_update_action = QAction("检查更新", self)
+        check_update_action.triggered.connect(self._manual_check_update)
+        menu.addAction(check_update_action)
 
         quit_action = QAction("退出", self)
         quit_action.triggered.connect(self._on_quit)
@@ -258,3 +282,98 @@ class MainWindow(QMainWindow):
             QSystemTrayIcon.Information,
             2000,
         )
+
+    def _check_update_on_startup(self):
+        """启动时检查更新"""
+        self._update_thread = UpdateCheckThread()
+        self._update_thread.update_found.connect(self._on_update_found)
+        self._update_thread.start()
+
+    def _manual_check_update(self):
+        """手动检查更新"""
+        self._update_thread = UpdateCheckThread()
+        self._update_thread.update_found.connect(self._on_update_found)
+        self._update_thread.no_update.connect(self._on_no_update)
+        self._update_thread.start()
+
+    def _on_update_found(self, update_info: dict):
+        """发现新版本"""
+        version = update_info["version"]
+        download_url = update_info["download_url"]
+        changelog = update_info.get("changelog", "")
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("发现新版本")
+        msg.setIcon(QMessageBox.Information)
+        msg.setText(f"发现新版本 v{version}\n\n当前版本: v{__version__}")
+        if changelog:
+            msg.setDetailedText(changelog)
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.Yes)
+        msg.button(QMessageBox.Yes).setText("立即更新")
+        msg.button(QMessageBox.No).setText("稍后提醒")
+
+        if msg.exec() == QMessageBox.Yes:
+            self._download_and_install(download_url)
+
+    def _on_no_update(self):
+        """没有更新"""
+        QMessageBox.information(
+            self,
+            "检查更新",
+            f"当前已是最新版本 v{__version__}",
+        )
+
+    def _download_and_install(self, url: str):
+        """下载并安装更新"""
+        import os
+        import sys
+        import tempfile
+        import subprocess
+        import psutil
+
+        # 创建进度对话框
+        progress = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
+        progress.setWindowTitle("更新")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        # 下载到临时文件
+        temp_file = os.path.join(tempfile.gettempdir(), "shokax_plugin_update.exe")
+
+        def update_progress(current, total):
+            if total > 0:
+                percent = int((current / total) * 100)
+                progress.setValue(percent)
+
+        # 下载
+        success = UpdateChecker.download_update(url, temp_file, update_progress)
+
+        progress.close()
+
+        if success:
+            reply = QMessageBox.question(
+                self,
+                "下载完成",
+                "更新已下载完成，是否立即安装？\n（程序将关闭并启动安装程序）",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+
+            if reply == QMessageBox.Yes:
+                # 获取当前进程 PID，传递给安装程序
+                current_pid = os.getpid()
+
+                # 启动安装程序，传递当前进程 PID
+                # 安装程序会等待当前进程退出后再继续
+                subprocess.Popen([temp_file, f"/PID={current_pid}"])
+
+                # 退出当前程序
+                from PySide6.QtWidgets import QApplication
+                QApplication.quit()
+        else:
+            QMessageBox.warning(
+                self,
+                "下载失败",
+                "更新下载失败，请稍后重试或手动下载。",
+            )

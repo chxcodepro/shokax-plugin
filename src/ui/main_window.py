@@ -299,13 +299,37 @@ class MainWindow(QMainWindow):
     def _on_update_found(self, update_info: dict):
         """发现新版本"""
         version = update_info["version"]
-        download_url = update_info["download_url"]
+        setup_url = update_info.get("setup_url")
+        portable_url = update_info.get("portable_url")
         changelog = update_info.get("changelog", "")
+
+        # 判断当前是安装版还是便携版
+        is_installed = UpdateChecker.is_installed_version()
+
+        # 选择对应的下载链接
+        if is_installed and setup_url:
+            download_url = setup_url
+            install_type = "安装版"
+        elif not is_installed and portable_url:
+            download_url = portable_url
+            install_type = "便携版"
+        else:
+            # 如果没有对应版本，使用任意可用的
+            download_url = setup_url or portable_url
+            install_type = "安装版" if setup_url else "便携版"
+
+        if not download_url:
+            QMessageBox.warning(
+                self,
+                "更新失败",
+                "未找到可用的更新文件",
+            )
+            return
 
         msg = QMessageBox(self)
         msg.setWindowTitle("发现新版本")
         msg.setIcon(QMessageBox.Information)
-        msg.setText(f"发现新版本 v{version}\n\n当前版本: v{__version__}")
+        msg.setText(f"发现新版本 v{version} ({install_type})\n\n当前版本: v{__version__}")
         if changelog:
             msg.setDetailedText(changelog)
         msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
@@ -314,7 +338,7 @@ class MainWindow(QMainWindow):
         msg.button(QMessageBox.No).setText("稍后提醒")
 
         if msg.exec() == QMessageBox.Yes:
-            self._download_and_install(download_url)
+            self._download_and_install(download_url, is_installed)
 
     def _on_no_update(self):
         """没有更新"""
@@ -324,13 +348,14 @@ class MainWindow(QMainWindow):
             f"当前已是最新版本 v{__version__}",
         )
 
-    def _download_and_install(self, url: str):
+    def _download_and_install(self, url: str, is_installed: bool):
         """下载并安装更新"""
         import os
         import sys
         import tempfile
         import subprocess
         import psutil
+        import time
 
         # 创建进度对话框
         progress = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
@@ -340,7 +365,8 @@ class MainWindow(QMainWindow):
         progress.setValue(0)
 
         # 下载到临时文件
-        temp_file = os.path.join(tempfile.gettempdir(), "shokax_plugin_update.exe")
+        filename = "shokax_plugin_update_setup.exe" if is_installed else "shokax_plugin_update.exe"
+        temp_file = os.path.join(tempfile.gettempdir(), filename)
 
         def update_progress(current, total):
             if total > 0:
@@ -353,27 +379,67 @@ class MainWindow(QMainWindow):
         progress.close()
 
         if success:
-            reply = QMessageBox.question(
-                self,
-                "下载完成",
-                "更新已下载完成，是否立即安装？\n（程序将关闭并启动安装程序）",
-                QMessageBox.Yes | QMessageBox.No,
-            )
+            if is_installed:
+                # 安装版：使用 setup 安装程序
+                reply = QMessageBox.question(
+                    self,
+                    "下载完成",
+                    "更新已下载完成，是否立即安装？\n（程序将关闭并启动安装程序）",
+                    QMessageBox.Yes | QMessageBox.No,
+                )
 
-            if reply == QMessageBox.Yes:
-                # 获取当前进程 PID，传递给安装程序
-                current_pid = os.getpid()
+                if reply == QMessageBox.Yes:
+                    # 获取当前进程 PID，传递给安装程序
+                    current_pid = os.getpid()
 
-                # 启动安装程序，传递当前进程 PID
-                # 安装程序会等待当前进程退出后再继续
-                subprocess.Popen([temp_file, f"/PID={current_pid}"])
+                    # 启动安装程序，传递当前进程 PID
+                    # 安装程序会等待当前进程退出后再继续
+                    subprocess.Popen([temp_file, f"/PID={current_pid}"])
 
-                # 退出当前程序
-                from PySide6.QtWidgets import QApplication
-                QApplication.quit()
+                    # 退出当前程序
+                    from PySide6.QtWidgets import QApplication
+                    QApplication.quit()
+            else:
+                # 便携版：覆盖安装
+                reply = QMessageBox.question(
+                    self,
+                    "下载完成",
+                    "更新已下载完成，是否立即安装？\n（程序将退出，请等待几秒后手动启动新版本）",
+                    QMessageBox.Yes | QMessageBox.No,
+                )
+
+                if reply == QMessageBox.Yes:
+                    current_exe = sys.executable
+                    backup_exe = current_exe + ".bak"
+
+                    # 创建批处理脚本来完成替换
+                    batch_script = os.path.join(tempfile.gettempdir(), "update_shokax.bat")
+                    with open(batch_script, "w", encoding="gbk") as f:
+                        f.write("@echo off\n")
+                        f.write("echo Waiting for application to close...\n")
+                        f.write("timeout /t 2 /nobreak >nul\n")
+                        f.write(f'if exist "{current_exe}" (\n')
+                        f.write(f'    move /y "{current_exe}" "{backup_exe}"\n')
+                        f.write(")\n")
+                        f.write(f'move /y "{temp_file}" "{current_exe}"\n')
+                        f.write("echo Update completed!\n")
+                        f.write(f'start "" "{current_exe}"\n')
+                        f.write(f'del "{backup_exe}" >nul 2>&1\n')
+                        f.write(f'del "%~f0"\n')
+
+                    # 启动批处理脚本
+                    subprocess.Popen(
+                        ["cmd", "/c", batch_script],
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+
+                    # 退出当前程序
+                    from PySide6.QtWidgets import QApplication
+                    QApplication.quit()
         else:
             QMessageBox.warning(
                 self,
                 "下载失败",
                 "更新下载失败，请稍后重试或手动下载。",
             )
+

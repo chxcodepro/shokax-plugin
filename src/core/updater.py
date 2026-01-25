@@ -1,5 +1,6 @@
 """自动更新模块"""
 import requests
+import sys
 from typing import Optional
 from packaging import version
 from src.core.version import __version__
@@ -18,7 +19,12 @@ class UpdateChecker:
         检查是否有新版本
 
         Returns:
-            如果有新版本，返回 {"version": "x.x.x", "download_url": "...", "changelog": "..."}
+            如果有新版本，返回 {
+                "version": "x.x.x",
+                "setup_url": "setup安装包URL",
+                "portable_url": "单文件exe URL",
+                "changelog": "更新日志"
+            }
             否则返回 None
         """
         try:
@@ -30,16 +36,21 @@ class UpdateChecker:
             current_version = __version__
 
             if version.parse(latest_version) > version.parse(current_version):
-                # 查找 exe 下载链接
-                download_url = None
+                # 查找 setup 和 portable exe 下载链接
+                setup_url = None
+                portable_url = None
+
                 for asset in data.get("assets", []):
-                    if asset["name"].endswith(".exe"):
-                        download_url = asset["browser_download_url"]
-                        break
+                    name = asset["name"]
+                    if "setup" in name.lower() and name.endswith(".exe"):
+                        setup_url = asset["browser_download_url"]
+                    elif name.endswith(".exe") and "setup" not in name.lower():
+                        portable_url = asset["browser_download_url"]
 
                 return {
                     "version": latest_version,
-                    "download_url": download_url or data.get("html_url"),
+                    "setup_url": setup_url,
+                    "portable_url": portable_url,
                     "changelog": data.get("body", ""),
                 }
 
@@ -47,6 +58,26 @@ class UpdateChecker:
         except Exception as e:
             print(f"检查更新失败: {e}")
             return None
+
+    @classmethod
+    def is_installed_version(cls) -> bool:
+        """
+        判断当前是否为安装版本
+
+        Returns:
+            True: 安装版本（在 Program Files 或 AppData 下）
+            False: 便携版本
+        """
+        if not getattr(sys, 'frozen', False):
+            return False
+
+        exe_path = sys.executable.lower()
+        # 检查是否在典型的安装目录下
+        return any(path in exe_path for path in [
+            'program files',
+            'program files (x86)',
+            r'appdata\local\programs'
+        ])
 
     @classmethod
     def download_update(cls, url: str, save_path: str, progress_callback=None) -> bool:

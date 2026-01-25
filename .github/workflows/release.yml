@@ -34,10 +34,9 @@ jobs:
       - name: Build executable
         run: python -m PyInstaller build.spec --noconfirm
 
-      - name: Download Inno Setup
+      - name: Install Inno Setup
         run: |
-          Invoke-WebRequest -Uri "https://jrsoftware.org/download.php/is.exe" -OutFile "innosetup.exe"
-          Start-Process -FilePath "innosetup.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -Wait
+          choco install innosetup -y
 
       - name: Update Inno Setup script version
         shell: bash

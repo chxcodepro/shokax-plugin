@@ -31,6 +31,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Generate version info
+        run: python generate_version_info.py
+
       - name: Build executable
         run: python -m PyInstaller build.spec --noconfirm
 

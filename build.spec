@@ -1,6 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 
 block_cipher = None
+
+# 从环境变量获取版本号
+version = os.environ.get('APP_VERSION', '0.0.0')
 
 a = Analysis(
     ['src/main.py'],
@@ -43,4 +47,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version='file_version_info.txt',
 )

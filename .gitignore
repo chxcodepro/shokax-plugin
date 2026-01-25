@@ -6,3 +6,5 @@ nul
 package-lock.json
 __pycache__
 *.pyc
+.ace-tool/
+file_version_info.txt
